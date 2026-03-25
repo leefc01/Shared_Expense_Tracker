@@ -1,122 +1,248 @@
+// ================= CONFIG =================
+const SCRIPT_PROPS = PropertiesService.getScriptProperties();
 
-// Get environment variables
-const VISION_API_KEY = PropertiesService.getScriptProperties().getProperty('VISION_API_KEY');
+const CONFIG = {
+  VISION_API_KEY: SCRIPT_PROPS.getProperty('VISION_API_KEY'),
+  INBOUND_FOLDER_ID: SCRIPT_PROPS.getProperty('INBOUND_FOLDER_ID'),
+  PROCESSED_FOLDER_ID: SCRIPT_PROPS.getProperty('PROCESSED_FOLDER_ID'),
+  LOG_LEVEL: SCRIPT_PROPS.getProperty('LOG_LEVEL') || "INFO",
+  SHEET_NAME: "Receipts",
+  LOG_SHEET: "OCR_Log"
+};
 
-function processReceiptsWithVision() {
-  const inboundFolderId = '[inboundfolderID]';
-  const processedFolderId = '[processedfolderID]';
-  
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const files = DriveApp.getFolderById(inboundFolderId).getFiles();
+// ================= LOGGER =================
+const LOG_LEVELS = { DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 };
 
-  while (files.hasNext()) {
-    const file = files.next();
-    const mimeType = file.getMimeType();
-    let fullText = "";
-
-    console.log(`Processing: ${file.getName()} (${mimeType})`);
-
-    try {
-      // STRATEGY 1: Image or PDF (Use Vision API)
-      if (mimeType.includes('image') || mimeType === 'application/pdf') {
-        fullText = callVisionAPI(file);
-      } 
-      // STRATEGY 2: Plain Text or Markdown
-      else if (mimeType === 'text/plain' || mimeType === 'text/markdown' || mimeType === 'text/csv') {
-        fullText = file.getBlob().getDataAsString();
-      }
-      // STRATEGY 3: Google Docs
-      else if (mimeType === 'application/vnd.google-apps.document') {
-        fullText = DocumentApp.openById(file.getId()).getBody().getText();
-      }
-      // STRATEGY 4: Microsoft Word (.docx)
-      else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        // We convert to a temp Google Doc to read text
-        const tempDoc = Drive.Files.copy({title: "temp", mimeType: "application/vnd.google-apps.document"}, file.getId());
-        fullText = DocumentApp.openById(tempDoc.id).getBody().getText();
-        Drive.Files.remove(tempDoc.id); // Clean up
-      }
-
-      if (fullText) {
-        // Extraction Logic (Shared for all file types)
-        //const amountMatch = fullText.match(/\$?\s?(\d+\.\d{2})/);
-        //const amount = amountMatch ? amountMatch[1] : "Check Manually";
-
-        const amount = extractBestAmount(fullText);
-        
-        const dateMatch = fullText.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
-        
-        const date = dateMatch ? dateMatch[1] : new Date();
-
-        sheet.appendRow([date, file.getName(), amount, file.getUrl()]);
-        file.moveTo(DriveApp.getFolderById(processedFolderId));
-        console.log(`Successfully logged and moved ${file.getName()}`);
-      } else {
-        console.warn(`Could not extract text from ${file.getName()}`);
-      }
-
-    } catch (e) {
-      console.error(`Error: ${e.toString()}`);
-    }
+function log(level, message) {
+  if (LOG_LEVELS[level] >= LOG_LEVELS[CONFIG.LOG_LEVEL]) {
+    console.log(`[${level}] ${message}`);
   }
 }
 
-// Helper function to keep the main loop clean
-function callVisionAPI(file) {
-  const base64Image = Utilities.base64Encode(file.getBlob().getBytes());
-  const payload = {
-    requests: [{
-      image: { content: base64Image },
-      features: [{ type: "DOCUMENT_TEXT_DETECTION" }]
-    }]
-  };
-  const options = {
-    method: "POST",
-    contentType: "application/json",
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-  const response = UrlFetchApp.fetch(`https://vision.googleapis.com/v1/images:annotate?key=${VISION_API_KEY}`, options);
-  const result = JSON.parse(response.getContentText());
-  return (result.responses && result.responses[0].fullTextAnnotation) ? result.responses[0].fullTextAnnotation.text : null;
+// ================= MAIN =================
+function processReceiptsWithVision() {
+  log("INFO", "Starting receipt processing");
+
+  const sheet = getOrCreateSheet(CONFIG.SHEET_NAME, [
+    "Date", "File Name", "Vendor", "Category", "Amount", "Confidence", "File URL", "Hash"
+  ]);
+
+  const logSheet = getOrCreateSheet(CONFIG.LOG_SHEET, [
+    "Timestamp", "File Name", "Raw Text"
+  ]);
+
+  const inboundFolder = DriveApp.getFolderById(CONFIG.INBOUND_FOLDER_ID);
+  const processedFolder = DriveApp.getFolderById(CONFIG.PROCESSED_FOLDER_ID);
+  const files = inboundFolder.getFiles();
+
+  const existingHashes = getExistingHashes(sheet);
+
+  while (files.hasNext()) {
+    const file = files.next();
+
+    log("INFO", `Processing: ${file.getName()}`);
+
+    try {
+      const fullText = extractTextFromFile(file);
+
+      if (!fullText) {
+        log("WARN", `No text: ${file.getName()}`);
+        continue;
+      }
+
+      const hash = generateHash(fullText);
+
+      if (existingHashes.has(hash)) {
+        log("WARN", `Duplicate detected: ${file.getName()}`);
+        file.moveTo(processedFolder);
+        continue;
+      }
+
+      const { amount, confidence } = extractBestAmount(fullText);
+      const date = extractDate(fullText);
+      const vendor = extractVendor(fullText);
+      const category = classifyCategory(fullText, vendor);
+
+      sheet.appendRow([
+        date,
+        file.getName(),
+        vendor,
+        category,
+        amount,
+        confidence,
+        file.getUrl(),
+        hash
+      ]);
+
+      logSheet.appendRow([
+        new Date(),
+        file.getName(),
+        fullText.substring(0, 50000) // prevent overflow
+      ]);
+
+      file.moveTo(processedFolder);
+
+      log("INFO", `Completed: ${file.getName()} | $${amount} (${confidence})`);
+
+    } catch (e) {
+      log("ERROR", `Error processing ${file.getName()}: ${e}`);
+    }
+  }
+
+  log("INFO", "Processing complete");
 }
 
+// ================= TEXT EXTRACTION =================
+function extractTextFromFile(file) {
+  const mimeType = file.getMimeType();
+
+  log("DEBUG", `Extracting text from ${mimeType}`);
+
+  if (mimeType.includes('image') || mimeType === 'application/pdf') {
+    return callVisionAPI(file);
+  }
+
+  if (mimeType.includes('text')) {
+    return file.getBlob().getDataAsString();
+  }
+
+  if (mimeType.includes('google-apps.document')) {
+    return DocumentApp.openById(file.getId()).getBody().getText();
+  }
+
+  return null;
+}
+
+// ================= VISION =================
+function callVisionAPI(file) {
+  log("DEBUG", "Calling Vision API");
+
+  const base64Image = Utilities.base64Encode(file.getBlob().getBytes());
+
+  const response = UrlFetchApp.fetch(
+    `https://vision.googleapis.com/v1/images:annotate?key=${CONFIG.VISION_API_KEY}`,
+    {
+      method: "POST",
+      contentType: "application/json",
+      payload: JSON.stringify({
+        requests: [{
+          image: { content: base64Image },
+          features: [{ type: "DOCUMENT_TEXT_DETECTION" }]
+        }]
+      }),
+      muteHttpExceptions: true
+    }
+  );
+
+  if (response.getResponseCode() !== 200) {
+    throw new Error("Vision API failure");
+  }
+
+  const result = JSON.parse(response.getContentText());
+
+  return result?.responses?.[0]?.fullTextAnnotation?.text || null;
+}
+
+// ================= AMOUNT =================
 function extractBestAmount(fullText) {
   const matches = [...fullText.matchAll(/\$?\s?(\d{1,4}(?:,\d{3})*\.\d{2})/g)];
+  if (!matches.length) return { amount: "Check Manually", confidence: 0 };
 
-  if (!matches.length) return "Check Manually";
-
-  const lines = fullText.split("\n").map(l => l.trim());
+  const lines = fullText.split("\n");
 
   let candidates = matches.map(match => {
     const value = parseFloat(match[1].replace(/,/g, ""));
-    const index = match.index;
-
     const line = lines.find(l => l.includes(match[0])) || "";
 
     let score = 0;
 
-    if (/total|amount due|balance/i.test(line)) score += 100;
+    if (/total|amount due|balance|grand total/i.test(line)) score += 100;
     if (/subtotal/i.test(line)) score -= 40;
     if (/tax/i.test(line)) score -= 30;
     if (/tip/i.test(line)) score -= 20;
 
-    return { value, score, line };
+    return { value, score };
   });
 
   const maxValue = Math.max(...candidates.map(c => c.value));
 
-  candidates = candidates.map(c => {
-    if (c.value === maxValue) c.score += 25;
-    return c;
-  });
-
   candidates = candidates.map((c, i) => {
+    if (c.value === maxValue) c.score += 25;
     if (i > candidates.length * 0.6) c.score += 20;
     return c;
   });
 
   candidates.sort((a, b) => b.score - a.score);
 
-  return candidates[0].value.toFixed(2);
+  const best = candidates[0];
+
+  return {
+    amount: best.value.toFixed(2),
+    confidence: Math.min(100, best.score)
+  };
+}
+
+// ================= HASH =================
+function generateHash(text) {
+  const raw = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.MD5,
+    text
+  );
+
+  return raw.map(b => (b + 256).toString(16).slice(-2)).join('');
+}
+
+function getExistingHashes(sheet) {
+  const values = sheet.getDataRange().getValues();
+  const hashes = new Set();
+
+  for (let i = 1; i < values.length; i++) {
+    hashes.add(values[i][7]); // hash column
+  }
+
+  return hashes;
+}
+
+// ================= OTHER HELPERS =================
+function extractDate(text) {
+  const match = text.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+  return match ? match[1] : new Date();
+}
+
+function extractVendor(text) {
+  const lines = text.split("\n").map(l => l.trim());
+
+  for (let i = 0; i < 5; i++) {
+    if (lines[i] && !/receipt|invoice|total/i.test(lines[i])) {
+      return lines[i];
+    }
+  }
+
+  return "Unknown Vendor";
+}
+
+function classifyCategory(text, vendor) {
+  const combined = (text + vendor).toLowerCase();
+
+  if (/utility|electric|water|gas/.test(combined)) return "Utilities";
+  if (/landscap|lawn/.test(combined)) return "Landscaping";
+  if (/repair|maintenance|plumb|hvac/.test(combined)) return "Maintenance";
+  if (/clean/.test(combined)) return "Cleaning";
+  if (/insurance/.test(combined)) return "Insurance";
+
+  return "Other";
+}
+
+// ================= SHEET =================
+function getOrCreateSheet(name, headers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+
+  if (!sheet) sheet = ss.insertSheet(name);
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(headers);
+  }
+
+  return sheet;
 }
