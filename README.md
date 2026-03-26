@@ -19,6 +19,7 @@ A Google Apps Script tool for HOAs, small organizations, and teams that automati
 - [Human corrections and ML training](#human-corrections-and-ml-training)
 - [Extending the code](#extending-the-code)
 - [Future enhancements](#future-enhancements)
+- [Security note aka Gemini's Sneak Diss](#security-note)
 
 ---
 
@@ -220,7 +221,7 @@ Central configuration constants. If you want to change sheet names, default mode
 
 ## Prerequisites
 
-- A **Google account** (personal Gmail works; Google Workspace is not required)
+- A **Google account** (personal Gmail works; Google Workspace is not required).  See [Security note aka Gemini's Sneak Diss](#security-note)
 - A **Google Sheet** where receipts will be logged — create a blank one before deploying
 - Two **Google Drive folders**: one for inbound files, one for processed files
 - The **folder IDs** for both (copy from the URL when you open a folder in Drive: `https://drive.google.com/drive/folders/THIS_PART`)
@@ -235,17 +236,17 @@ For the Vision API path only:
 
 This path uses Google Drive's built-in OCR. It works well for clean PDFs and Google Docs. For blurry photos or low-quality scans, see the Vision API path below.
 
-**Step 1 — Copy the script files into Apps Script**
+**Step 1 — Create a Google Sheet**
 
-1. Go to [script.google.com](https://script.google.com) and click **New project**.
+1. Create or open the Google Sheet for your tracker.
+2. Click **Extensions** > **Apps Script**. This opens a separate Apps Script project bound to that sheet.
+
+**Step 2 — Copy the script files into Apps Script**
+
+1. Continuing Step 1 (You can also go to [script.google.com](https://script.google.com))
 2. Delete the default `Code.gs` file.
 3. For each `.js` file in this repository, click **+** > **Script** and paste in the file contents. Name the script file to match (e.g. `main`, `document_processor`, etc.).
 4. Click **Save**.
-
-**Step 2 — Link your Google Sheet**
-
-1. Open the Google Sheet you created for logging.
-2. Click **Extensions** > **Apps Script**. This opens a separate Apps Script project bound to that sheet.
 
 > The simplest setup is to open your Google Sheet and go to **Extensions > Apps Script**. This creates a project that is automatically linked to your sheet — no additional configuration needed to connect to it.
 
@@ -472,3 +473,36 @@ Set `LOGGER_SHEET_ENABLED = ON` in Script Properties. Log entries will be append
 - Integration with Google Document AI (`DOCUMENT_AI` processor mode)
 - Customizable confidence thresholds per field
 - Multi-language receipt support
+
+
+---
+
+## Security note
+
+It is highly recommended to create a new google account to run this script.  The script needs access only to the spreadsheet where it executes, the folders it handles, and a temporary file it creates.  However, Google's security model wants the ID which executes the script to have access to all of your documents on your Google Drive.
+
+Snippets from Google Gemini when asked about limiting script access.
+
+> **How to Make the Permission Less "Scary"**
+>
+> If you don't like the script having access to "All your Google Sheets," you can restrict it to only the spreadsheet you are currently in.
+
+Later, when limiting the permissions to just the active file didn't work.
+
+> That error is appearing because the @OnlyCurrentDoc tag we added earlier is doing its job too well. It tells Google to only grant access to the specific spreadsheet the script is attached to, which explicitly blocks the script from opening other files like Google Docs or Word files by their ID
+>
+> To answer your first question: Yes, that scope is essentially a "master key" for every Google Doc you have access to. It is not limited to the files in your specific folder.
+> 
+> To your second question: Unfortunately, **Google Apps Script does not offer a "Folder-only" OAuth scope.** The Google security model is generally designed around "Services" (All Drive, All Docs, All Sheets) rather than "Location" (This Folder only). This is a common point of frustration for developers looking to follow the "Principle of Least Privilege."
+>
+> **How to Handle Security with 3+ Users**
+>
+> Since you are working in a Shared Drive with a small group, here is the standard "Best Practice" for this scenario:
+>
+> - **Trust the Code, Not the Scope:** The script technically has the authority to see all files, but it only has the instructions to look at your specific inboundFolderId. As long as you (the developer) don't write code that deletes your whole Drive, the "master key" stays safely in the drawer.
+>
+> - **Use a Dedicated "Bot" Account (Optional):** If you are very concerned about security, some teams create a dummy Google Account (e.g., receipt-bot@yourdomain.com). You give that bot account "Contributor" access only to the specific Shared Drive folders. You then "own" and run the script from that account. That way, even with a broad "All Files" scope, the script's reach is physically limited to what that bot account can see.
+>
+> - **Internal Visibility:** Since this script is only shared with 3 specific people and not published to the web, the "Unverified App" warning you saw earlier is actually your primary security layer. It ensures no one outside your group can accidentally authorize the script.
+
+I went with the separate bot account, despite Gemini's sneak diss.
