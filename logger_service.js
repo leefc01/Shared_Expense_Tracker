@@ -1,31 +1,39 @@
 /**
  * LoggerService
- * 
- * Lightweight logging utility with configurable levels.
- * 
- * Levels:
- * 0 = NONE
- * 1 = ERROR
- * 2 = WARN
- * 3 = INFO
- * 
- * Usage:
- * LoggerService.info("message");
- * LoggerService.warn("message");
- * LoggerService.error("message");
+ * Lightweight, configurable logging with optional Sheet logging.
+ * Supports LEVEL override and audit logging to a dedicated sheet.
  */
-const LoggerService = {
-  LEVEL: 3,
+const LoggerService = (function() {
+  // Cache properties for performance
+  const props = PropertiesService.getScriptProperties();
+  const LEVEL = parseInt(props.getProperty("LOGGER_LEVEL")) || 3; // default INFO
+  const SHEET_LOG_ENABLED = (props.getProperty("LOGGER_SHEET_ENABLED") || "OFF") === "ON";
+  let logSheetCache = null;
 
-  info(msg) {
-    if (this.LEVEL >= 3) console.log(`[INFO] ${new Date().toISOString()} - ${msg}`);
-  },
-
-  warn(msg) {
-    if (this.LEVEL >= 2) console.warn(`[WARN] ${new Date().toISOString()} - ${msg}`);
-  },
-
-  error(msg) {
-    if (this.LEVEL >= 1) console.error(`[ERROR] ${new Date().toISOString()} - ${msg}`);
+  function getLogSheet() {
+    if (!logSheetCache && SHEET_LOG_ENABLED) {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      logSheetCache = ss.getSheetByName(APP_DEFAULTS.LOG_SHEET)
+        || ss.insertSheet(APP_DEFAULTS.LOG_SHEET);
+      if (logSheetCache.getLastRow() === 0) {
+        logSheetCache.appendRow(["Timestamp", "Level", "Message"]);
+      }
+    }
+    return logSheetCache;
   }
-};
+
+  function log(levelName, msg) {
+    const ts = new Date().toISOString();
+    console.log(`[${levelName}] ${ts} - ${msg}`);
+    if (SHEET_LOG_ENABLED) {
+      const sheet = getLogSheet();
+      if (sheet) sheet.appendRow([ts, levelName, msg]);
+    }
+  }
+
+  return {
+    info(msg) { if (LEVEL >= 3) log("INFO", msg); },
+    warn(msg) { if (LEVEL >= 2) log("WARN", msg); },
+    error(msg) { if (LEVEL >= 1) log("ERROR", msg); }
+  };
+})();

@@ -1,4 +1,7 @@
-// drive_service.gs
+/**
+ * DriveService
+ * Handles inbound/processed folder retrieval.
+ */
 const DriveService = {
   getInboundFiles() {
     const folderId = PropertiesService.getScriptProperties().getProperty("INBOUND_FOLDER_ID");

@@ -1,49 +1,25 @@
 /**
- * @file ocr_service.gs
- * @description
- * Service layer for OCR extraction.
- * Automatically selects the correct OCR / parser based on file type:
- *  - Vision API for images/PDFs
- *  - Drive OCR for Google Docs / Word
- *  - Native text for plain text / CSV / Markdown
- * Includes logging for debugging and tracing.
+ * OCRService
+ * Handles text extraction using Vision API, Drive OCR, or native text parsing.
  */
-
 const OCRService = {
-
-  /**
-   * Extract text from a file based on file type and OCR_MODE.
-   * @param {GoogleAppsScript.Drive.File} file
-   * @returns {string|null} Extracted text, or null if extraction failed
-   */
   extractText(file) {
-    const mode = PropertiesService.getScriptProperties().getProperty("OCR_MODE") || "VISION";
+    const mode = PropertiesService.getScriptProperties().getProperty("OCR_MODE") || APP_DEFAULTS.OCR_MODE;
     const mime = file.getMimeType();
-
     LoggerService.info(`File type: ${mime}, OCR_MODE: ${mode}`);
 
-    // --- Document files ---
-    if (mime === "application/vnd.google-apps.document" ||
-        mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    if (APP_DEFAULTS.DOCUMENT_MIMES.includes(mime)) {
       LoggerService.info("Using Drive OCR for document file");
-      const text = this.extractWithDrive(file);
-      if (!text) LoggerService.warn("Drive OCR failed for document");
-      return text;
+      return this.extractWithDrive(file);
     }
 
-    // --- Plain text files ---
     if (mime.startsWith("text/")) {
       LoggerService.info("Using native text parser");
-      try {
-        return file.getBlob().getDataAsString();
-      } catch (e) {
-        LoggerService.error("Failed to read text file: " + e.toString());
-        return null;
-      }
+      try { return file.getBlob().getDataAsString(); } 
+      catch (e) { LoggerService.error("Failed to read text file: " + e.toString()); return null; }
     }
 
-    // --- Images and PDFs ---
-    if (mime.includes("image") || mime === "application/pdf") {
+    if (APP_DEFAULTS.IMAGE_MIMES.includes(mime) || mime === APP_DEFAULTS.PDF_MIME) {
       if (mode === "DRIVE") {
         LoggerService.info("Using Drive OCR for image/pdf");
         const text = this.extractWithDrive(file);
@@ -58,38 +34,17 @@ const OCRService = {
     return null;
   },
 
-  /**
-   * Extract text using Google Vision API
-   * @param {GoogleAppsScript.Drive.File} file
-   * @returns {string|null} Extracted text or null
-   */
   extractWithVision(file) {
     return VisionService.extractText(file);
   },
 
-  /**
-   * Extract text using Google Drive OCR via temporary Google Doc
-   * @param {GoogleAppsScript.Drive.File} file
-   * @returns {string|null} Extracted text
-   */
   extractWithDrive(file) {
     try {
-      const resource = {
-        title: "temp_ocr_" + new Date().getTime(),
-        mimeType: "application/vnd.google-apps.document"
-      };
-
-      // Convert file to Google Doc for OCR
+      const resource = { title: "temp_ocr_" + new Date().getTime(), mimeType: "application/vnd.google-apps.document" };
       const temp = Drive.Files.copy(resource, file.getId());
       const text = DocumentApp.openById(temp.id).getBody().getText();
-
-      // Cleanup temporary doc
-      Drive.Files.remove(temp.id);
+      Drive.Files.remove(temp.id); // cleanup
       return text;
-
-    } catch (e) {
-      LoggerService.error("Drive OCR failed: " + e.toString());
-      return null;
-    }
+    } catch (e) { LoggerService.error("Drive OCR failed: " + e.toString()); return null; }
   }
 };
