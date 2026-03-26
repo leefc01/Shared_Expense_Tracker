@@ -1,6 +1,21 @@
-// logger_service.gs
+/**
+ * LoggerService
+ * 
+ * Lightweight logging utility with configurable levels.
+ * 
+ * Levels:
+ * 0 = NONE
+ * 1 = ERROR
+ * 2 = WARN
+ * 3 = INFO
+ * 
+ * Usage:
+ * LoggerService.info("message");
+ * LoggerService.warn("message");
+ * LoggerService.error("message");
+ */
 const LoggerService = {
-  LEVEL: 3, // 0=NONE, 1=ERROR, 2=WARN, 3=INFO
+  LEVEL: 3,
 
   info(msg) {
     if (this.LEVEL >= 3) console.log(`[INFO] ${new Date().toISOString()} - ${msg}`);
@@ -12,9 +27,5 @@ const LoggerService = {
 
   error(msg) {
     if (this.LEVEL >= 1) console.error(`[ERROR] ${new Date().toISOString()} - ${msg}`);
-  },
-
-  setLevel(level) {
-    if ([0, 1, 2, 3].includes(level)) this.LEVEL = level;
   }
 };
