@@ -479,9 +479,9 @@ Set `LOGGER_SHEET_ENABLED = ON` in Script Properties. Log entries will be append
 
 ## Security note
 
-It is highly recommended to create a new google account to run this script.  The script needs access only to the spreadsheet where it executes, the folders it handles, and a temporary file it creates.  However, Google's security model wants the ID which executes the script to have access to all of your documents on your Google Drive.
+It is highly recommended to create a new google account to run this script.  This can be a bot/service account.  The script needs access only to the spreadsheet where it executes, the folders it handles, a temporary file it creates, and API if you're using one.  However, Google's security model wants the executing ID to have access to all of your documents on your Google Drive.  If you don't want to give away the keys to the kingdom, setup a new google account.
 
-Snippets from Google Gemini when asked about limiting script access.
+Snippets from Google Gemini when asked about limiting script access.  Note, I never used the word "scary."
 
 > **How to Make the Permission Less "Scary"**
 >
