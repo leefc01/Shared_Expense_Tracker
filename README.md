@@ -1,6 +1,8 @@
 # Shared Expense Tracker
 
-A Google Apps Script tool for HOAs, small organizations, and teams that automatically reads receipts and invoices from Google Drive, extracts key information, and logs everything to a Google Sheet. No server, no backend, no monthly fees — it runs entirely inside your Google account.
+A Google Apps Script tool for HOAs, small organizations, and teams that automatically reads receipts and invoices from Google Drive, extracts key information, and logs everything to a Google Sheet. Default option is no server, no backend, no monthly fees — it runs entirely inside your Google account.
+
+Bring your own API keys and you can use more robust options like Vision API or Document API.
 
 ---
 
